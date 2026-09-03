@@ -178,6 +178,39 @@ assert A2.all_in_cost > A.all_in_cost              # higher costs → higher all
 assert A2.projected_profit < A.projected_profit    # → lower profit
 print(f"A2 overrides  closing={A2.buy_closing_cost:,}  fin={A2.financing_cost:,}  all_in={A2.all_in_cost:,}")
 
+# ── Purchase price is a cost basis, NOT a substitute for list price ────────────
+# The obvious way to model "what I actually paid" — overriding enriched["price"] — silently
+# corrupts the report, because the ARV sanity cap scales off `price`: a below-list purchase
+# shrinks ARV to a multiple of the buyer's own number and prints a risk flag calling it
+# "list". Scenario F proves the real `purchase_price` kwarg leaves the value side untouched,
+# and F_old proves the shortcut really does corrupt it (so this test is not tautological).
+f_paid = 300_000                                   # well under A's $400k list
+F = ev.evaluate(_prop("F", a_price, a_sqft), enriched=encA, purchase_price=f_paid)
+assert F.arv == A.arv, (F.arv, A.arv)              # ARV anchored on LIST — unchanged
+assert F.arv_confidence == A.arv_confidence
+assert not any("capped at" in r for r in F.risk_flags), F.risk_flags   # no phantom cap flag
+assert F.list_price == a_price and F.purchase_price == f_paid, (F.list_price, F.purchase_price)
+assert F.list_psf == A.list_psf == round(a_price / a_sqft, 2), F.list_psf   # still LIST psf
+assert F.purchase_psf == round(f_paid / a_sqft, 2), F.purchase_psf
+# Every cost-side line moves to the basis; the identity holds on the basis.
+assert F.buy_closing_cost == int(f_paid * BUY_CLOSING_PCT), F.buy_closing_cost
+assert F.financing_cost == int(f_paid * HARD_MONEY_LTV * HARD_MONEY_APR * 0.5
+                               + f_paid * HARD_MONEY_LTV * HARD_MONEY_POINTS_PCT), F.financing_cost
+assert F.all_in_cost == (f_paid + F.buy_closing_cost + F.rehab_estimate
+                         + F.holding_cost_6mo + F.financing_cost), F.all_in_cost
+assert F.projected_profit > A.projected_profit     # cheaper basis, same ARV → more profit
+assert F.mao_70_rule == A.mao_70_rule              # MAO derives from ARV + rehab only
+assert F.passes_70_rule and not A.passes_70_rule   # $300k clears the MAO that $400k missed
+# The shortcut this replaces: same deal with price itself overridden. ARV collapses and the
+# phantom flag appears — exactly what the public "what I paid" route must never do.
+F_old = ev.evaluate(_prop("Fo", f_paid, a_sqft), enriched={**encA, "price": f_paid})
+assert F_old.arv < A.arv, (F_old.arv, A.arv)
+assert any("capped at" in r and "list" in r for r in F_old.risk_flags), F_old.risk_flags
+# With no purchase_price the basis IS list, so every existing report is byte-identical.
+assert A.purchase_price == A.list_price == a_price
+print(f"F  purchase_price={f_paid:,} -> arv unchanged {F.arv:,}, profit {A.projected_profit:,} -> {F.projected_profit:,}; "
+      f"old shortcut would have capped ARV to {F_old.arv:,}")
+
 # Trust-boundary guard: whitelist + range-clamp on user-supplied assumptions.
 from dashboard.search_service import _clean_assumptions
 cleaned = _clean_assumptions({"hard_money_apr": 9.9, "rental_opex_pct": -1,

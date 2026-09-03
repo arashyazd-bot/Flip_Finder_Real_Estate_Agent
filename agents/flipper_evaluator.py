@@ -158,6 +158,14 @@ class FlipReport:
     # Comps (for display)
     comps_summary: List[str] = field(default_factory=list)
 
+    # Purchase basis vs. list price. `purchase_price` above is the COST BASIS the P&L ran on
+    # (the user's actual/offer price when supplied, else list). `list_price` is what the
+    # listing asked — kept separately because the ARV sanity caps, the motivated-seller
+    # signal and `list_psf` are anchored on LIST, never on what a buyer chose to pay.
+    # Defaulted (after comps_summary) so the dataclass's positional contract is unchanged.
+    list_price: int = 0
+    purchase_psf: float = 0.0
+
 
 def _rehab_psf(year_built: Optional[int]) -> int:
     if not year_built:
@@ -329,7 +337,8 @@ class FlipperEvaluator:
         self.fallback_psf = fallback_psf
 
     def evaluate(self, base_prop, enriched: Optional[dict] = None,
-                 extra_comp_candidates: Optional[List[dict]] = None) -> FlipReport:
+                 extra_comp_candidates: Optional[List[dict]] = None,
+                 purchase_price: Optional[int] = None) -> FlipReport:
         enriched = enriched or {}
         risks: List[str] = []
 
@@ -337,6 +346,22 @@ class FlipperEvaluator:
         # analyze a listing with no real price — return an explicit NO_DEAL so a missing/
         # fabricated price can never surface as an opportunity.
         price = int(enriched.get("price") or enriched.get("unformattedPrice") or base_prop.price or 0)
+        # Cost basis: what the buyer actually pays (or intends to offer). Deliberately a SEPARATE
+        # variable from `price` (list). Overriding `price` itself — the obvious shortcut — silently
+        # corrupts the report: the ARV cap below scales off list, so entering a below-list purchase
+        # would shrink the ARV to a multiple of the buyer's own number and print a risk flag
+        # calling it "list". Measured: 1815 2nd Ave entered at $320k dropped ARV $684,709 →
+        # $512,000 and gained a phantom "capped at 1.6x list" flag. `basis` drives every
+        # cost-side line (closing, loan, all-in, 70% rule, profit floor, taxes); `price` keeps
+        # driving value-side anchors (ARV caps, motivated-seller signal, list_psf).
+        basis = int(purchase_price) if purchase_price and int(purchase_price) > 0 else 0
+        if price <= 0 < basis:
+            # Off-market subject with a user-supplied purchase price and no list price on record:
+            # anchor the value-side caps on the only price we have, and say so.
+            price = basis
+            risks.append("No list price on record — ARV sanity caps anchored on your purchase price")
+        if basis <= 0:
+            basis = price
         sqft = int(enriched.get("livingArea") or base_prop.sqft or 0)
         if price <= 0 or sqft <= 0:
             return _no_price_report(base_prop, price, sqft)
@@ -471,7 +496,9 @@ class FlipperEvaluator:
 
         # --- Holding cost (6 months) ---
         tax_rate = float(enriched.get("propertyTaxRate") or 1.25) / 100.0
-        annual_tax = price * tax_rate
+        # Taxes on the BASIS, deliberately: California reassesses at the sale price (Prop 13),
+        # so a buyer's carry is set by what they paid, not by the asking price.
+        annual_tax = basis * tax_rate
         hoa_details = enriched.get("hoa_details") or {}
         monthly_hoa = 0
         if isinstance(hoa_details, dict):
@@ -483,7 +510,7 @@ class FlipperEvaluator:
         if not monthly_hoa:
             monthly_hoa = int(enriched.get("monthlyHoaFee") or base_prop.hoa_fees or 0)
 
-        loan_amt = price * self.ltv
+        loan_amt = basis * self.ltv
         financing_6mo = int(
             loan_amt * self.hard_money_apr * (self.hold_months / 12)  # interest carry over the hold
             + loan_amt * self.points_pct                             # origination points (upfront)
@@ -496,19 +523,19 @@ class FlipperEvaluator:
         )
 
         selling = int(arv * self.selling_cost_pct)
-        buy_closing = int(price * self.buy_closing_pct)  # acquisition closing (its own report line)
-        all_in = price + buy_closing + rehab + holding + financing_6mo
+        buy_closing = int(basis * self.buy_closing_pct)  # acquisition closing (its own report line)
+        all_in = basis + buy_closing + rehab + holding + financing_6mo
         # Rental yield basis = acquisition + stabilization capital only. The 6-mo hard-money
         # interest and vacant-hold carry in all_in are FLIP-phase costs a long-term hold never
         # pays, so cap rate is measured against this basis, not all_in.
-        rental_basis = price + buy_closing + rehab
+        rental_basis = basis + buy_closing + rehab
         net_resale = arv - selling
         profit = net_resale - all_in
         profit_margin_pct = round((profit / all_in) * 100, 1) if all_in else 0.0
 
         # --- 70% rule ---
         mao = int(arv * 0.70 - rehab)
-        passes_70 = price <= mao
+        passes_70 = basis <= mao
 
         # --- Rental P&L (BRRRR) ---
         rent_est = estimate_rent(cs, sqft) if sqft else None
@@ -546,7 +573,7 @@ class FlipperEvaluator:
         # gate used above (rental_verdict), so the headline and rental tracks can't disagree.
         # The profit floor scales with price: a flat $20k is a trivial margin on a $1M home.
         rental_qualifies = rental_verdict in ("GOOD_RENTAL", "DECENT_RENTAL")
-        min_profit = max(20_000, int(0.05 * price))
+        min_profit = max(20_000, int(0.05 * basis))
         verdict = "NO_DEAL"
         verdict_reason = ""
         if rehab_signal == "teardown":
@@ -555,7 +582,7 @@ class FlipperEvaluator:
         elif profit > min_profit and profit_margin_pct >= STRONG_MARGIN_PCT:
             verdict = "STRONG_FLIP"
             _r70 = ("passes the 70% rule" if passes_70
-                    else f"misses the 70% rule by ${price - mao:,}")
+                    else f"misses the 70% rule by ${basis - mao:,}")
             verdict_reason = f"Strong {profit_margin_pct}% margin (${profit:,}) — {_r70}"
         elif profit > min_profit and profit_margin_pct >= 7:
             verdict = "MARGINAL_FLIP"
@@ -629,7 +656,7 @@ class FlipperEvaluator:
             verdict=verdict,
             verdict_reason=verdict_reason,
             flip_score=score,
-            purchase_price=price,
+            purchase_price=basis,
             sqft=sqft,
             year_built=year_built if isinstance(year_built, int) else None,
             home_type=home_type,
@@ -665,4 +692,6 @@ class FlipperEvaluator:
             rental_score=rental_score,
             risk_flags=risks,
             comps_summary=comp_lines,
+            list_price=price,
+            purchase_psf=round(basis / sqft, 2) if sqft else 0.0,
         )
