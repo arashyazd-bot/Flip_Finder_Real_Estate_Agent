@@ -141,6 +141,8 @@ def _flip_report_to_dict(a, prop, enriched) -> dict:
         "verdict_reason": a.verdict_reason,
         "flip_score": a.flip_score,
         "purchase_price": a.purchase_price,
+        "list_price": a.list_price,        # differs from purchase_price only when the user set a basis
+        "purchase_psf": a.purchase_psf,
         "bedrooms": (enriched.get("bedrooms") if enriched else None) or getattr(prop, "bedrooms", None),
         "bathrooms": (enriched.get("bathrooms") if enriched else None) or getattr(prop, "bathrooms", None),
         "sqft": a.sqft,

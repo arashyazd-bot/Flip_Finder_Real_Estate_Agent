@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Analyze a property - FlipFinder</title>
+  <meta name="description" content="Paste a Zillow link, tell FlipFinder what you'd pay, and get the full flip underwriting: ARV from recorded sales, rehab, all-in cost, profit, and the 70% rule.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    /* Landing-page tokens (styles.css uses different names for the same hexes). */
+    :root {
+      --paper: #F4F6F8; --surface: #FFFFFF; --ink: #16191F; --slate: #5A636F; --faint: #8C95A1;
+      --line: #E3E7EC; --line-hi: #C7CED7; --amber: #E8901A; --amber-deep: #C97A0E;
+      --amber-dim: rgba(232,144,26,0.12); --green: #15A34A; --green-tint: #E5F4EA;
+      --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    }
+    body.analyze-body { margin: 0; background: var(--paper); color: var(--ink); }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+    nav.top { position: sticky; top: 0; z-index: 5; background: rgba(244,246,248,0.92);
+      backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+    nav.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+    .wordmark { font-weight: 700; font-size: 1.15rem; color: var(--ink); text-decoration: none; position: relative; }
+    .wordmark::after { content: ""; position: absolute; left: 0; bottom: -4px; width: 30px; height: 3px;
+      border-radius: 3px; background: var(--amber); }
+    .nav-links { display: flex; gap: .6rem; align-items: center; }
+    .btn { display: inline-block; border-radius: 9px; font-weight: 600; font-size: .95rem; padding: .72rem 1.35rem;
+      text-decoration: none; cursor: pointer; border: 1px solid transparent; font-family: inherit; line-height: 1.2; }
+    .btn-amber { background: var(--amber); color: #fff; }
+    .btn-amber:hover { background: var(--amber-deep); }
+    .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line-hi); }
+    .btn-ghost:hover { border-color: var(--ink); }
+    .btn:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+    .btn[disabled] { opacity: .55; cursor: not-allowed; }
+    .nav-links .btn { padding: .5rem .95rem; font-size: .88rem; }
+
+    header.head { padding: 2.6rem 0 1.2rem; }
+    .kicker { font-family: var(--mono); font-size: .7rem; letter-spacing: .14em; text-transform: uppercase;
+      color: var(--faint); font-weight: 600; }
+    h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); letter-spacing: -0.02em; margin: .4rem 0 .5rem; font-weight: 700; }
+    p.sub { color: var(--slate); font-size: 1.03rem; margin: 0; max-width: 42rem; }
+
+    form.an { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+      padding: 1.25rem; margin: 1.4rem 0; box-shadow: 0 10px 30px rgba(20,30,50,0.06); }
+    .an label { display: block; font-weight: 600; font-size: .86rem; margin-bottom: .35rem; }
+    .an .hint { color: var(--faint); font-weight: 400; font-family: var(--mono); font-size: .72rem; margin-left: .4rem; }
+    .an input[type=url], .an input[type=number] { width: 100%; box-sizing: border-box; font: inherit;
+      padding: .72rem .85rem; border: 1px solid var(--line-hi); border-radius: 9px; background: #fff; color: var(--ink); }
+    .an .grid2 { display: grid; grid-template-columns: 1fr 260px; gap: 1rem; align-items: end; }
+    .an details { margin-top: 1rem; border-top: 1px solid var(--line); padding-top: .8rem; }
+    .an summary { cursor: pointer; font-weight: 600; font-size: .9rem; color: var(--slate); }
+    .an summary .badge { display: inline-block; min-width: 1.2em; padding: 0 .4em; margin-left: .4em;
+      border-radius: 999px; background: var(--amber); color: #fff; font-family: var(--mono); font-size: .72rem; }
+    .an .pf-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin-top: .8rem; }
+    .an .pf-field span { display: block; font-size: .78rem; color: var(--slate); margin-bottom: .25rem; font-weight: 600; }
+    .an .actions { display: flex; gap: .8rem; align-items: center; margin-top: 1.1rem; flex-wrap: wrap; }
+    .an .actions .note { color: var(--faint); font-size: .82rem; }
+    .link-btn { background: none; border: 0; color: var(--amber-deep); font: inherit; font-size: .85rem; cursor: pointer; padding: 0; }
+
+    .progress { display: none; align-items: center; gap: .8rem; padding: 1rem 1.2rem; margin: 1rem 0;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 12px; font-family: var(--mono); font-size: .85rem; }
+    .progress.on { display: flex; }
+    .spin { width: 16px; height: 16px; border: 2px solid var(--line-hi); border-top-color: var(--amber);
+      border-radius: 50%; animation: spin .9s linear infinite; flex: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .err { display: none; padding: 1rem 1.2rem; margin: 1rem 0; border-radius: 12px; background: rgba(220,38,38,0.08);
+      border: 1px solid rgba(220,38,38,0.25); color: #991B1B; }
+    .err.on { display: block; }
+
+    /* Report card — reuses .card / .verdict / .breakdown from styles.css; layout tweaks only. */
+    #result .card { margin: 1.2rem 0; }
+    #result .card-body { padding: 1.3rem 1.4rem; }
+    #result .card-title { font-size: 1.15rem; }
+    #result .card-meta .your { font-weight: 700; color: var(--ink); }
+    #result .breakdown { margin-top: 1rem; }
+    #result .breakdown h4 { margin: 1.1rem 0 .35rem; }
+    .data-note { margin: .8rem 0 0; padding: .7rem .9rem; border-radius: 9px; background: var(--paper);
+      border: 1px solid var(--line); font-size: .84rem; color: var(--slate); line-height: 1.5; }
+    .data-note b { color: var(--ink); }
+    .data-note ul { margin: .35rem 0 0; padding-left: 1.1rem; }
+    .result-actions { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; margin: 1rem 0 0; }
+    .result-actions .meta { color: var(--faint); font-family: var(--mono); font-size: .78rem; }
+
+    .cta { margin: 2.2rem 0 3rem; padding: 1.6rem; border-radius: 16px; background: var(--ink); color: #fff; }
+    .cta h2 { margin: 0 0 .4rem; font-size: 1.3rem; }
+    .cta p { margin: 0 0 1rem; color: #C7CED7; max-width: 40rem; }
+    .cta a.plain { color: #fff; }
+    footer.foot { padding: 1.5rem 0 2.5rem; color: var(--faint); font-size: .8rem; }
+
+    @media (max-width: 720px) {
+      .an .grid2 { grid-template-columns: 1fr; }
+      .an .pf-grid { grid-template-columns: repeat(2, 1fr); }
+      .nav-links a.plain { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+    @media print {
+      nav.top, header.head, form.an, .progress, .err, .result-actions, .cta, footer.foot { display: none !important; }
+      body.analyze-body { background: #fff; }
+      #result .card { border: 0; box-shadow: none; margin: 0; }
+      #result details { display: block; } #result details > * { display: block; }
+    }
+  </style>
+</head>
+<body class="analyze-body">
+  <nav class="top" aria-label="Main">
+    <div class="wrap">
+      <a class="wordmark" href="/">FlipFinder.</a>
+      <div class="nav-links">
+        <a class="btn btn-ghost" href="/login">Sign in</a>
+        <a class="btn btn-amber" href="mailto:hello@modeo.io?subject=FlipFinder%20access%20request&body=Name%3A%0AMarkets%20I%20invest%20in%3A%0ADeals%20in%20the%20last%2012%20months%3A%0AEmail%20to%20provision%3A%0A%0AAnything%20else%3A%0A">Request access</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="wrap">
+    <header class="head">
+      <span class="kicker">Free · no account</span>
+      <h1>Analyze one property.</h1>
+      <p class="sub">Paste a Zillow link. Tell us what you'd pay. You get the same underwriting FlipFinder runs on every house in a city scan — printable as a PDF.</p>
+    </header>
+
+    <form class="an" id="an-form" novalidate>
+      <div class="grid2">
+        <div>
+          <label for="url">Zillow listing link</label>
+          <input type="url" id="url" name="url" inputmode="url" autocomplete="off" spellcheck="false" required
+                 placeholder="https://www.zillow.com/homedetails/…">
+        </div>
+        <div>
+          <label for="price">What you'd pay <span class="hint">optional · list price if blank</span></label>
+          <input type="number" id="price" name="price" min="10000" max="50000000" step="1000" inputmode="numeric" placeholder="495000">
+        </div>
+      </div>
+
+      <details id="assume">
+        <summary>Underwriting assumptions <span id="assume-badge" class="badge" hidden>0</span></summary>
+        <div class="pf-grid">
+          <label class="pf-field"><span>Hard-money APR %</span><input type="number" id="as-apr" min="0" max="40" step="0.5" placeholder="10.5"></label>
+          <label class="pf-field"><span>Hold (months)</span><input type="number" id="as-hold" min="1" max="24" step="1" placeholder="6"></label>
+          <label class="pf-field"><span>Buy closing %</span><input type="number" id="as-close" min="0" max="6" step="0.25" placeholder="1.5"></label>
+          <label class="pf-field"><span>Loan points %</span><input type="number" id="as-points" min="0" max="6" step="0.25" placeholder="2.5"></label>
+          <label class="pf-field"><span>Selling %</span><input type="number" id="as-sell" min="0" max="15" step="0.25" placeholder="6.25"></label>
+          <label class="pf-field"><span>Rental OpEx %</span><input type="number" id="as-opex" min="10" max="70" step="1" placeholder="25"></label>
+          <label class="pf-field"><span>Refi APR %</span><input type="number" id="as-refi" min="0" max="20" step="0.25" placeholder="7.5"></label>
+        </div>
+        <div class="actions" style="margin-top:.7rem">
+          <button type="button" id="as-clear" class="link-btn">Reset to defaults</button>
+          <span class="note">blank = Sacramento default</span>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button class="btn btn-amber" id="go" type="submit">Analyze it</button>
+        <span class="note">Three free analyses a day. Real recorded sales in Sacramento County; Zillow comps elsewhere, provenance shown.</span>
+      </div>
+    </form>
+
+    <div class="progress" id="progress" role="status" aria-live="polite">
+      <div class="spin" aria-hidden="true"></div>
+      <span id="status-line">Starting…</span>
+    </div>
+    <div class="err" id="err" role="alert"></div>
+
+    <section id="result" aria-live="polite"></section>
+
+    <section class="cta" id="access">
+      <span class="kicker" style="color:#8C95A1">Want this on every house in a city?</span>
+      <h2>Request access to the full scan.</h2>
+      <p>FlipFinder ranks an entire market against these same numbers, hundreds of listings at a time. Seats are provisioned by hand.</p>
+      <a class="btn btn-amber" href="mailto:hello@modeo.io?subject=FlipFinder%20access%20request&body=Name%3A%0AMarkets%20I%20invest%20in%3A%0ADeals%20in%20the%20last%2012%20months%3A%0AEmail%20to%20provision%3A%0A%0AAnything%20else%3A%0A">Request access by email</a>
+      &nbsp; <a class="plain" href="/login">Already approved? Sign in</a>
+    </section>
+  </main>
+
+  <footer class="foot"><div class="wrap">Estimates, not appraisals. ARV, rehab, and profit figures are automated estimates from public listing and recorded-sale data. Verify every number independently before making an offer. &copy; 2026 MODEO.</div></footer>
+
+  <script src="/static/report_render.js"></script>
+  <script>
+  (function () {
+    const $ = (s) => document.querySelector(s);
+    const form = $("#an-form"), urlEl = $("#url"), priceEl = $("#price"), go = $("#go");
+    const progress = $("#progress"), statusLine = $("#status-line"), err = $("#err"), result = $("#result");
+    let running = false;
+
+    // Prefill from the landing-page form / a shared link.
+    const qs = new URLSearchParams(location.search);
+    if (qs.get("url")) urlEl.value = qs.get("url");
+    if (qs.get("price")) priceEl.value = qs.get("price");
+
+    // Assumption badge (same ids as the app, so assumptionsQuery()/effectiveAssumptions() apply verbatim).
+    function updateBadge() {
+      const n = Object.keys(assumptions()).length, b = $("#assume-badge");
+      b.textContent = n; b.hidden = n === 0;
+    }
+    ASSUMPTION_FIELDS.forEach(([id]) => $("#" + id).addEventListener("input", updateBadge));
+    $("#as-clear").addEventListener("click", () => { ASSUMPTION_FIELDS.forEach(([id]) => $("#" + id).value = ""); updateBadge(); });
+
+    function setStatus(msg) { statusLine.textContent = msg; progress.classList.add("on"); }
+    function stopProgress() { progress.classList.remove("on"); }
+    function showError(msg) { err.textContent = msg; err.classList.add("on"); }
+    function clearError() { err.classList.remove("on"); err.textContent = ""; }
+    const money = (n) => "$" + Math.round(n || 0).toLocaleString();
+
+    function compSourcesHtml(r) {
+      const p = r.comp_provenance || {}, cs = r.comp_sources || {};
+      const sold = p.sold || 0, est = (r.comp_count || 0) - sold;
+      let src;
+      if (cs.county === "ok") src = `<b>${cs.county_count}</b> Sacramento County recorded sales pulled, plus Zillow nearby homes.`;
+      else if (cs.county === "unavailable") src = `County recorded sales were <b>unavailable</b> for this run — Zillow nearby homes only.`;
+      else src = `Zillow nearby homes only. <b>Recorded-sale comps currently cover Sacramento County</b>; this property is outside it.`;
+      const rest = r.comp_count
+        ? `The ARV rests on <b>${sold} closed sale${sold === 1 ? "" : "s"}</b> and <b>${est} estimate${est === 1 ? "" : "s"}</b> (${escapeHtml(r.arv_confidence || "")} confidence).`
+        : `<b>No usable comps</b> — the ARV is a fallback and should not be relied on.`;
+      const notes = (r.notes || []).map((n) => `<li>${escapeHtml(n)}</li>`).join("");
+      return `<div class="data-note">${src} ${rest}${notes ? `<ul>${notes}</ul>` : ""}</div>`;
+    }
+
+    function render(r) {
+      const v = escapeHtml(r.verdict || "NO_DEAL"), rv = escapeHtml(r.rental_verdict || "NO_RENT_DATA");
+      const yourPrice = r.list_price && r.purchase_price !== r.list_price;
+      const priceHtml = yourPrice
+        ? `<span class="your">${money(r.purchase_price)} your price</span> <span class="muted">· list ${money(r.list_price)}</span>`
+        : money(r.purchase_price);
+      result.innerHTML = `
+        <article class="card">
+          <div class="card-body">
+            <div class="card-title"><a href="${safeUrl(r.link)}" target="_blank" rel="noopener">${escapeHtml(r.address)}, ${escapeHtml(r.city)}, ${escapeHtml(r.state)}</a></div>
+            <div class="card-meta">${priceHtml} · ${r.bedrooms || "?"}bd / ${r.bathrooms || "?"}ba · ${(r.sqft || 0).toLocaleString()} sqft · ${escapeHtml(r.home_type || "")}${r.year_built ? " · built " + r.year_built : ""}</div>
+            <div class="verdict-row">
+              <span class="verdict ${v}" title="Flip verdict">Flip: ${v.replace(/_/g, " ")} (${r.flip_score})</span>
+              <span class="verdict ${rv}" title="Rental verdict">Rent: ${rv.replace(/_/g, " ")} (${r.rental_score || 0})</span>
+            </div>
+            <div class="card-headline">${headlineHtml(r, "flip")}</div>
+            ${compSourcesHtml(r)}
+            <div class="breakdown">${breakdownRows(r, true)}</div>
+            <div class="result-actions">
+              <a class="btn btn-amber" id="pdf" href="#" hidden>Download PDF</a>
+              <button class="btn btn-ghost" type="button" id="print">Print</button>
+              <span class="meta" id="result-meta"></span>
+            </div>
+          </div>
+        </article>`;
+      $("#print").addEventListener("click", () => window.print());
+      result.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    // fetch + a hand-rolled SSE reader instead of EventSource: on a 4xx (rate limit, bad
+    // link) EventSource only fires a bare error, but the JSON body carries the message the
+    // visitor actually needs ("you've used your 3 free analyses…").
+    async function run() {
+      const url = urlEl.value.trim(), price = priceEl.value.trim();
+      clearError(); result.innerHTML = "";
+      if (!/^https:\/\/([a-z0-9-]+\.)*zillow\.com\//i.test(url)) { showError("Paste a zillow.com listing link (it should contain _zpid)."); urlEl.focus(); return; }
+      let q = `/api/public/analyze/stream?url=${encodeURIComponent(url)}`;
+      if (price) q += `&price=${encodeURIComponent(price)}`;
+      q += assumptionsQuery();
+      history.replaceState(null, "", `/analyze?url=${encodeURIComponent(url)}${price ? "&price=" + encodeURIComponent(price) : ""}`);
+
+      running = true; go.disabled = true; setStatus("Starting…");
+      try {
+        const r = await fetch(q, { credentials: "include", headers: { "Accept": "text/event-stream" } });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          showError(j.detail || `Something went wrong (HTTP ${r.status}).`);
+          return;
+        }
+        const reader = r.body.getReader(), dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf("\n\n")) >= 0) {
+            const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+            let event = "message", data = "";
+            for (const line of frame.split("\n")) {
+              if (line.startsWith("event:")) event = line.slice(6).trim();
+              else if (line.startsWith("data:")) data += line.slice(5).trim();
+            }
+            if (data) handle(event, JSON.parse(data));
+          }
+        }
+      } catch (e) {
+        showError("Connection lost — please try again.");
+      } finally {
+        running = false; go.disabled = false; stopProgress();
+      }
+    }
+
+    function handle(event, d) {
+      if (event === "status") setStatus(d.message);
+      else if (event === "report") render(d.report);
+      else if (event === "complete") {
+        const pdf = $("#pdf");
+        if (pdf) { pdf.href = `/api/public/report/${encodeURIComponent(d.token)}/pdf`; pdf.hidden = false; }
+        const m = $("#result-meta");
+        if (m) m.textContent = `${d.elapsed}s${d.from_cache ? " · from cache" : ""} · PDF link valid 30 min`;
+        stopProgress();
+      }
+      else if (event === "error") { stopProgress(); showError(d.message || "Something went wrong."); }
+    }
+
+    form.addEventListener("submit", (e) => { e.preventDefault(); if (!running) run(); });
+    if (qs.get("url")) run();   // arrived from the landing form — go straight in
+  })();
+  </script>
+</body>
+</html>

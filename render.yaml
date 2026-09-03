@@ -19,3 +19,14 @@ services:
       # random per-boot secret and every deploy/restart signs everyone out.
       - key: DASHBOARD_SECRET_KEY
         generateValue: true
+      # Public single-property analyzer (landing-page lead magnet). Each fresh run costs one
+      # Bright Data record (~$0.0015); the cache is empty on Render, so every run is fresh.
+      # Kill switch + limits are adjustable here without a redeploy.
+      - key: PUBLIC_ANALYZE_ENABLED
+        value: "1"
+      - key: PUBLIC_ANALYZE_PER_IP_DAY
+        value: "3"
+      - key: PUBLIC_ANALYZE_GLOBAL_DAY
+        value: "100"
+      - key: PUBLIC_ENRICH_TIMEOUT_SEC
+        value: "120"

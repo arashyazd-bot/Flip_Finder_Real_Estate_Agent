@@ -176,6 +176,14 @@
     .access-note { font-family: var(--mono); font-size: 0.74rem; color: #8C95A1; margin-top: 1.1rem; }
     .access-note a { color: #D6DAE0; }
 
+    /* try it (single-property analyzer hand-off to /analyze) */
+    .try-form { display: flex; gap: 0.7rem; margin-top: 1.6rem; max-width: 44rem; }
+    .try-form input { flex: 1; min-width: 0; font: inherit; font-size: 0.98rem; padding: 0.78rem 0.95rem; border: 1px solid var(--line-hi); border-radius: 9px; background: var(--surface); color: var(--ink); }
+    .try-form input:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; border-color: var(--amber); }
+    .try-form .btn { white-space: nowrap; }
+    .try-note { font-family: var(--mono); font-size: 0.74rem; color: var(--faint); margin-top: 0.8rem; }
+    @media (max-width: 600px) { .try-form { flex-direction: column; } }
+
     /* footer */
     footer { border-top: 1px solid var(--line); padding: 2.2rem 0 2.8rem; }
     .foot { display: flex; flex-wrap: wrap; gap: 1rem 2.2rem; align-items: baseline; font-size: 0.85rem; color: var(--slate); }
@@ -191,6 +199,7 @@
       <div class="nav-links">
         <a class="plain" href="#how">How it works</a>
         <a class="plain" href="#report">The report</a>
+        <a class="plain" href="#try">Try it</a>
         <a class="plain" href="#access">Access</a>
         <a class="btn btn-ghost" href="/login">Sign in</a>
         <a class="btn btn-amber" href="mailto:hello@modeo.io?subject=FlipFinder%20access%20request&body=Name%3A%0AMarkets%20I%20invest%20in%3A%0ADeals%20in%20the%20last%2012%20months%3A%0AEmail%20to%20provision%3A%0A%0AAnything%20else%3A%0A">Request access</a>
@@ -276,6 +285,21 @@
           <p class="shot-cap">A real card from the scan above. Comps labeled sold vs estimate, data timestamped.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section class="band" id="try">
+    <div class="wrap">
+      <span class="kicker">Try it free</span>
+      <h2>Run it on a house you're looking at.</h2>
+      <p class="sub">Paste a Zillow link and tell us what you'd pay. You get the same report, three times a day, no account needed.</p>
+      <form class="try-form" action="/analyze" method="get">
+        <input type="url" name="url" inputmode="url" autocomplete="off" spellcheck="false" required
+               placeholder="https://www.zillow.com/homedetails/…" aria-label="Zillow listing link"
+               pattern="https://([a-z0-9-]+\.)*zillow\.com/.*" title="A zillow.com listing link">
+        <button class="btn btn-amber" type="submit">Analyze it</button>
+      </form>
+      <p class="try-note">Real recorded sales for Sacramento County. Everywhere else, Zillow comps with their provenance shown, never hidden.</p>
     </div>
   </section>
 

@@ -24,6 +24,11 @@ Endpoints:
   GET    /api/admin/runs               — recent run log
   GET    /api/admin/stats              — aggregate metrics
 
+  --- public, no auth (rate-limited; the landing page's lead magnet) ---
+  GET    /analyze                          — single-property workspace page
+  GET    /api/public/analyze/stream        — SSE: one Zillow URL (+ purchase price, assumptions) -> report
+  GET    /api/public/report/{token}/pdf    — PDF of a report this server produced (token from `complete`)
+
 Static frontend served from /.
 """
 import asyncio
@@ -548,6 +553,107 @@ async def login_page():
 @app.get("/admin")
 async def admin_page():
     return FileResponse(STATIC_DIR / "admin.html")
+
+
+# ---- public single-property analyzer (no auth; rate-limited; see dashboard/public_analyze.py) ----
+
+from dashboard import public_analyze as pub  # noqa: E402  (after env + db bootstrap above)
+
+
+@app.get("/analyze")
+async def analyze_page():
+    return FileResponse(STATIC_DIR / "analyze.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/public/analyze/stream")
+async def public_analyze_stream(
+    request: Request,
+    url: str = Query(..., max_length=600),
+    # The buyer's actual/offer price. A real evaluator kwarg — NOT an override of the list
+    # price, which would silently cap the ARV (see FlipperEvaluator.evaluate).
+    price: Optional[float] = Query(None, ge=pub.PRICE_MIN, le=pub.PRICE_MAX),
+    # Same knobs, names and bounds as /api/search/stream so the shared assumptions UI works.
+    hm_apr: Optional[float] = Query(None, ge=0, le=0.40),
+    hold_months: Optional[int] = Query(None, ge=1, le=24),
+    buy_closing_pct: Optional[float] = Query(None, ge=0, le=0.06),
+    points_pct: Optional[float] = Query(None, ge=0, le=0.06),
+    selling_pct: Optional[float] = Query(None, ge=0, le=0.15),
+    opex_pct: Optional[float] = Query(None, ge=0, le=0.70),
+    refi_apr: Optional[float] = Query(None, ge=0, le=0.20),
+    session: Optional[str] = Cookie(None, alias=SESSION_COOKIE),
+):
+    try:
+        canon, zpid = pub.parse_zillow_url(url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ip = pub.client_ip(request)
+    # Logged on purpose: confirms Render's X-Forwarded-For shape from production so the
+    # hop index in public_analyze can be pinned. Low volume (capped at GLOBAL_DAY).
+    logger.info("public analyze ip=%s xff=%r zpid=%s",
+                ip, request.headers.get("x-forwarded-for"), zpid)
+
+    # Approved users bypass the anonymous limiter (they're already a known account) but
+    # still get one-at-a-time; their runs log under their own email for cost telemetry.
+    who = _verify_session(session) if session else None
+    if who:
+        pub.acquire_inflight(ip)
+    else:
+        rej = pub.check_and_charge(ip, cached=pub.is_cached(zpid))
+        if rej:
+            raise HTTPException(status_code=rej["status"], detail=rej["detail"],
+                                headers={"Retry-After": str(rej.get("retry_after", 60))})
+    # Admission (and the in-flight slot) is settled ABOVE, before the 200 is committed —
+    # rejecting inside the generator would surface as a generic stream error to the client.
+
+    assumptions = {
+        k: v for k, v in {
+            "hard_money_apr": hm_apr, "hold_months": hold_months,
+            "buy_closing_pct": buy_closing_pct, "points_pct": points_pct,
+            "selling_cost_pct": selling_pct, "rental_opex_pct": opex_pct,
+            "refi_apr": refi_apr,
+        }.items() if v is not None
+    }
+
+    async def gen():
+        try:
+            async for ev in pub.stream_one(canon, zpid, pub.clean_price(price),
+                                           assumptions or None, who or pub.ANON_EMAIL):
+                yield _sse(ev["event"], ev["data"])
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("public analyze stream crashed")
+            yield _sse("error", {"code": "UPSTREAM", "message": "Something went wrong on our side."})
+        finally:
+            pub.release(ip)
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/public/report/{token}/pdf")
+async def public_report_pdf(token: str):
+    """Render a report THIS server produced. Never accepts a client payload — a public
+    renderer of arbitrary JSON would stamp attacker text into a FlipFinder-branded PDF."""
+    payload = pub.get_payload(token)
+    if not payload:
+        raise HTTPException(status_code=410,
+                            detail="This report link has expired — run the analysis again for a fresh PDF.")
+    from dashboard.pdf_report import build_pdf
+    try:
+        pdf_bytes = build_pdf(payload)
+    except Exception:
+        logger.exception("public PDF generation failed")
+        raise HTTPException(status_code=500, detail="PDF generation failed")
+    import re as _re
+    safe = _re.sub(r"[^A-Za-z0-9]+", "_", str(payload.get("city") or "report")).strip("_") or "report"
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="FlipFinder Report - {safe}.pdf"'},
+    )
 
 
 # Fallbacks so crawlers/browsers that request /favicon.ico or /favicon.svg get the served static SVG

@@ -82,9 +82,14 @@ def _cache_path(zpid: str) -> Path:
 
 
 class BrightDataZillowEnricher:
-    def __init__(self, token: Optional[str] = None, dataset_id: str = ZILLOW_DETAIL_DATASET_ID):
+    def __init__(self, token: Optional[str] = None, dataset_id: str = ZILLOW_DETAIL_DATASET_ID,
+                 poll_timeout_sec: int = POLL_TIMEOUT_SEC):
         self.token = token or _load_token()
         self.dataset_id = dataset_id
+        # Per-instance so an interactive caller (a web request) can bound the wait, while the
+        # batch city scan keeps the long module default. Note a caller cancelling its own
+        # future does NOT stop the worker thread — only this deadline does.
+        self.poll_timeout_sec = int(poll_timeout_sec)
         # Populated by enrich(): {"attempted": int, "from_cache": int, "fresh": int}
         self.last_stats: Dict[str, int] = {"attempted": 0, "from_cache": 0, "fresh": 0}
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -180,7 +185,8 @@ class BrightDataZillowEnricher:
 
     def _wait_for_snapshot(self, snapshot_id: str) -> List[dict]:
         url = SNAPSHOT_URL.format(snapshot_id=snapshot_id)
-        deadline = time.time() + POLL_TIMEOUT_SEC
+        timeout = self.poll_timeout_sec
+        deadline = time.time() + timeout
         while time.time() < deadline:
             r = requests.get(url, params={"format": "json"}, headers=self._headers, timeout=30)
             if r.status_code == 200:
@@ -190,12 +196,12 @@ class BrightDataZillowEnricher:
                 # Some datasets wrap results
                 return data.get("data") or data.get("results") or []
             if r.status_code == 202:
-                elapsed = int(POLL_TIMEOUT_SEC - (deadline - time.time()))
+                elapsed = int(timeout - (deadline - time.time()))
                 print(f"  ...still running ({elapsed}s elapsed)", file=sys.stderr)
                 time.sleep(POLL_INTERVAL_SEC)
                 continue
             raise RuntimeError(f"Snapshot poll failed {r.status_code}: {r.text[:500]}")
-        raise TimeoutError(f"Snapshot {snapshot_id} did not complete within {POLL_TIMEOUT_SEC}s")
+        raise TimeoutError(f"Snapshot {snapshot_id} did not complete within {timeout}s")
 
 
 if __name__ == "__main__":
