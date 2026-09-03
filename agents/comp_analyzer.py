@@ -90,6 +90,15 @@ def _norm_addr(s: Optional[str]) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def _addr_of(h: dict) -> str:
+    """Street address of a nearbyHomes-shaped dict — flat `streetAddress` or nested
+    `address.streetAddress` (the county feed and some Bright Data records use the latter)."""
+    a = h.get("streetAddress")
+    if not a and isinstance(h.get("address"), dict):
+        a = h["address"].get("streetAddress")
+    return a or ""
+
+
 def _size_adjust_psf(comp_psf: float, comp_sqft: int, subject_sqft: int) -> float:
     """Adjust a comp's $/sqft to the subject's size, bounded to ±20% so a single odd
     comp can't wildly swing ARV. Without subject_sqft, returns the raw psf unchanged."""
@@ -133,12 +142,33 @@ def analyze_comps(enriched: dict, subject_home_type: Optional[str] = None,
     cs = CompSet()
     nearby = _parse_nearby(enriched.get("nearbyHomes"))
     if extra_candidates:
+        # Dedupe by zpid AND by normalized street address. A pooled candidate describing the
+        # same house as one of the subject's own nearbyHomes REPLACES it rather than joining
+        # it. Why: the county assessor feed (dashboard/county_comps) keys records by APN, so
+        # its zpid can never collide with Zillow's — and it carries the sqft of record where
+        # Zillow was measured 24% off (1816 Commercial Way: 1,142 vs 1,411). Counting both
+        # double-weighted the sale AND mixed a known-bad sqft into the ARV. Replacing is never
+        # a downgrade: every pooled source only contributes actual sales (_build_sold_pool
+        # filters to recentlysold; the county feed is recorded deeds), so a pooled record can
+        # only match or improve the status of the Zillow entry it displaces.
         _seen_zpids = {str(h.get("zpid") or "").strip() for h in nearby}
+        _by_addr = {}
+        for i, h in enumerate(nearby):
+            k = _norm_addr(_addr_of(h))
+            if k:
+                _by_addr.setdefault(k, i)
         for h in extra_candidates:
             z = str(h.get("zpid") or "").strip()
             if z and z in _seen_zpids:
                 continue
+            k = _norm_addr(_addr_of(h))
+            if k and k in _by_addr:
+                nearby[_by_addr[k]] = h   # same house from a better-keyed source: replace
+                _seen_zpids.add(z)
+                continue
             _seen_zpids.add(z)
+            if k:
+                _by_addr[k] = len(nearby)
             nearby.append(h)
 
     # Property types that should never be used as comps for a residential flip

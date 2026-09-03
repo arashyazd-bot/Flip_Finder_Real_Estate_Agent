@@ -161,6 +161,27 @@ E = ev.evaluate(_prop("E", 400_000, 2000), enriched=encE, extra_comp_candidates=
 assert E.comp_count == 3, (E.comp_count, E.comps_summary)  # 901 own + 902/903 pooled, not 4
 print(f"E  zpid dedupe -> {E.comp_count} comps (shared zpid not double-counted)")
 
+# Address dedupe: a pooled record for the SAME house as one of the subject's own comps
+# must replace it, not join it. The county feed keys by APN (never collides with a Zillow
+# zpid) and carries the sqft of record; seen live on 1815 2nd Ave, where 1816 Commercial
+# Way was counted twice — at Zillow's wrong 1,142 sqft AND the county's 1,411.
+encG = dict(encC)
+encG["nearbyHomes"] = [json.dumps({"zpid": 555, "streetAddress": "1816 Commercial Way",
+                                   "price": 730_000, "livingArea": 1142,
+                                   "homeType": "SINGLE_FAMILY", "hdpTypeDimension": "Zestimate"})]
+county_dupe = {"zpid": "APN-01003330050000", "price": 730_000, "livingArea": 1411,
+               "homeType": "SINGLE_FAMILY", "hdpTypeDimension": "RecentlySold",
+               "address": {"streetAddress": "1816  COMMERCIAL WAY"},   # nested, padded, upper
+               "latitude": 38.557, "longitude": -121.4905}
+G = ev.evaluate(_prop("G", 400_000, 1207), enriched=encG,
+                extra_comp_candidates=[county_dupe] + pool)
+assert G.comp_count == 4, (G.comp_count, G.comps_summary)          # 1 replaced + 3 pooled, not 5
+_g1816 = [l for l in G.comps_summary if "commercial way" in l.lower()]
+assert len(_g1816) == 1, G.comps_summary                            # the house appears ONCE
+assert "1411sqft" in _g1816[0] and "1142sqft" not in _g1816[0], _g1816   # county sqft won
+assert _g1816[0].endswith("[sold]"), _g1816                         # and its sold status
+print(f"G  address dedupe -> {G.comp_count} comps; 1816 Commercial Way once, at county sqft")
+
 # LOW-9: profit floor scales with price (flat $20k on cheap, 5% on expensive)
 assert max(20_000, int(0.05 * 300_000)) == 20_000
 assert max(20_000, int(0.05 * 1_000_000)) == 50_000
